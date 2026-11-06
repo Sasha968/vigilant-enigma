@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Ракетомодель: Орбита</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; user-select: none; }
+        canvas { display: block; }
+        
+        /* Интерфейс в стиле SFS */
+        .ui-panel {
+            position: absolute;
+            background: rgba(15, 25, 45, 0.85);
+            border: 1px solid #2a4a7f;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 13px;
+            backdrop-filter: blur(4px);
+        }
+        
+        #telemetry { top: 10px; left: 10px; min-width: 220px; }
+        #telemetry h3 { margin: 0 0 10px 0; color: #4fb4ff; font-size: 14px; border-bottom: 1px solid #2a4a7f; padding-bottom: 5px; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .stat-label { color: #88aadd; }
+        .stat-value { color: #fff; font-family: 'Consolas', monospace; font-weight: bold; }
+        
+        #controls { bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; align-items: center; }
+        .btn {
+            background: #1a3a6a; color: #fff; border: 1px solid #4fb4ff;
+            padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 14px;
+            transition: all 0.2s;
+        }
+        .btn:hover { background: #4fb4ff; color: #000; }
+        .btn:active { transform: scale(0.95); }
+        
+        #throttle-container { display: flex; flex-direction: column; align-items: center; }
+        #throttle-slider { width: 150px; accent-color: #4fb4ff; }
+        
+        #message {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9); border: 2px solid #ff4444; padding: 30px;
+            border-radius: 10px; text-align: center; display: none; z-index: 100;
+        }
+        #message.success { border-color: #44ff44; }
+        
+        #builder {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(10, 15, 30, 0.95); z-index: 50;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        #builder.hidden { display: none; }
+        .part-btn {
+            background: #1a3a6a; color: #fff; border: 1px solid #4fb4ff;
+            padding: 15px 30px; margin: 5px; border-radius: 5px; cursor: pointer;
+            font-size: 16px; width: 300px; text-align: left;
+        }
+        .part-btn:hover { background: #4fb4ff; color: #000; }
+        .part-stats { font-size: 11px; color: #88aadd; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <!-- Меню конструктора -->
+    <div id="builder">
+        <h1 style="color: #4fb4ff; margin-bottom: 30px;">🚀 РАКЕТОМОДЕЛЬ: ОРБИТА</h1>
+        <div style="display: flex; gap: 20px;">
+            <div>
+                <h3 style="color: #ff6666;">ОБТЕКАТЕЛИ</h3>
+                <button class="part-btn" onclick="addPart('nose')">Носовой обтекатель<div class="part-stats">Масса: 50 кг | Высота: 2 м</div></button>
+            </div>
+            <div>
+                <h3 style="color: #66aaff;">ТОПЛИВНЫЕ БАКИ</h3>
+                <button class="part-btn" onclick="addPart('tank_small')">Бак S-100<div class="part-stats">Масса: 100 кг | Топливо: 800 кг</div></button>
+                <button class="part-btn" onclick="addPart('tank_large')">Бак L-500<div class="part-stats">Масса: 400 кг | Топливо: 4000 кг</div></button>
+            </div>
+            <div>
+                <h3 style="color: #ffaa66;">ДВИГАТЕЛИ</h3>
+                <button class="part-btn" onclick="addPart('engine_small')">Двигатель "Искра"<div class="part-stats">Тяга: 20000 Н | Расход: 10 кг/с</div></button>
+                <button class="part-btn" onclick="addPart('engine_large')">Двигатель "Титан"<div class="part-stats">Тяга: 80000 Н | Расход: 40 кг/с</div></button>
+            </div>
+        </div>
+        <div style="margin-top: 30px; font-family: monospace; color: #88aadd;">
+            Деталей: <span id="b-parts">0</span> | Масса: <span id="b-mass">0</span> кг | Тяга: <span id="b-thrust">0</span> Н | Т/Т: <span id="b-twr">0</span>
+        </div>
+        <div style="margin-top: 20px; display: flex; gap: 10px;">
+            <button class="btn" onclick="clearBuilder()">ОЧИСТИТЬ</button>
+            <button class="btn" style="background: #4fb4ff; color: #000;" onclick="startFlight()">🚀 ЗАПУСК</button>
+        </div>
+    </div>
+
+    <!-- Игровой интерфейс -->
+    <div id="telemetry" class="ui-panel">
+        <h3>📊 ТЕЛЕМЕТРИЯ</h3>
+        <div class="stat-row"><span class="stat-label">Высота:</span><span class="stat-value" id="t-alt">0 м</span></div>
+        <div class="stat-row"><span class="stat-label">Скорость:</span><span class="stat-value" id="t-speed">0 м/с</span></div>
+        <div class="stat-row"><span class="stat-label">Апоцентр:</span><span class="stat-value" id="t-apo">0 м</span></div>
+        <div class="stat-row"><span class="stat-label">Перицентр:</span><span class="stat-value" id="t-peri">0 м</span></div>
+        <div class="stat-row"><span class="stat-label">Топливо:</span><span class="stat-value" id="t-fuel">0 кг</span></div>
+        <div class="stat-row"><span class="stat-label">Ступень:</span><span class="stat-value" id="t-stage">1</span></div>
+    </div>
+
+    <div id="controls" class="ui-panel">
+        <div id="throttle-container">
+            <span style="font-size: 11px; color: #88aadd;">ТЯГА</span>
+            <input type="range" id="throttle-slider" min="0" max="100" value="100">
+        </div>
+        <button class="btn" onclick="resetFlight()">СБРОС (R)</button>
+        <button class="btn" onclick="showBuilder()">В МЕНЮ</button>
+    </div>
+
+    <div id="message">
+        <h2 id="msg-title"></h2>
+        <p id="msg-text"></p>
+        <button class="btn" onclick="hideMessage()">ОК</button>
+    </div>
+
+    <canvas id="game"></canvas>
+
+    <script>
+        // ==================== ФИЗИЧЕСКИЕ КОНСТАНТЫ ====================
+        // Масштаб: 1 пиксель = 100 метров (динамически меняется камерой)
+        const G = 0.5; // Гравитационная постоянная (подобрана для игры)
+        
+        const PLANETS = [
+            { name: "Земля", x: 0, y: 0, mass: 500000, radius: 300, color: "#2266ff", atmosphere: 400 },
+            { name: "Луна", x: 4000, y: 0, mass: 8000, radius: 80, color: "#aaaaaa", atmosphere: 0 }
+        ];
+
+        // База деталей
+        const PARTS_DB = {
+            nose: { name: "Обтекатель", mass: 50, height: 20, width: 15, type: "nose", color: "#ff4444" },
+            tank_small: { name: "Бак S-100", mass: 100, fuel: 800, maxFuel: 800, height: 40, width: 20, type: "tank", color: "#dddddd" },
+            tank_large: { name: "Бак L-500", mass: 400, fuel: 4000, maxFuel: 4000, height: 80, width: 25, type: "tank", color: "#cccccc" },
+            engine_small: { name: "Искра", mass: 80, thrust: 20000, fuelRate: 10, height: 25, width: 18, type: "engine", color: "#555555" },
+            engine_large: { name: "Титан", mass: 300, thrust: 80000, fuelRate: 40, height: 35, width: 28, type: "engine", color: "#333333" }
+        };
+
+        // ==================== СОСТОЯНИЕ ИГРЫ ====================
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d");
+        let width, height;
+
+        let rocket = null;
+        let camera = { x: 0, y: 0, zoom: 1 };
+        let keys = {};
+        let throttle = 100;
+        let stars = [];
+        let flightActive = false;
+
+        // Генерация звёзд
+        for (let i = 0; i < 500; i++) {
+            stars.push({
+                x: (Math.random() - 0.5) * 20000,
+                y: (Math.random() - 0.5) * 20000,
+                size: Math.random() * 2
+            });
+        }
+
+        // ==================== КОНСТРУКТОР ====================
+        let builderParts = [];
+
+        function addPart(id) {
+            const p = JSON.parse(JSON.stringify(PARTS_DB[id]));
+            p.id = Math.random();
+            // Двигатели вниз, нос вверх
+            if (p.type === "engine") builderParts.unshift(p);
+            else if (p.type === "nose") builderParts.push(p);
+            else {
+                const engCount = builderParts.filter(x => x.type === "engine").length;
+                builderParts.splice(engCount, 0, p);
+            }
+            updateBuilderUI();
+        }
+
+        function clearBuilder() {
+            builderParts = [];
+            updateBuilderUI();
+        }
+
+        function updateBuilderUI() {
+            let mass = 0, thrust = 0;
+            builderParts.forEach(p => {
+                mass += p.mass + (p.fuel || 0);
+                if (p.thrust) thrust += p.thrust;
+            });
+            document.getElementById("b-parts").innerText = builderParts.length;
+            document.getElementById("b-mass").innerText = mass;
+            document.getElementById("b-thrust").innerText = thrust;
+            document.getElementById("b-twr").innerText = mass > 0 ? (thrust / (mass * 0.05)).toFixed(2) : 0;
+        }
+
+        function showBuilder() {
+            flightActive = false;
+            document.getElementById("builder").classList.remove("hidden");
+        }
+
+        function startFlight() {
+            if (builderParts.length === 0) { alert("Собери ракету!"); return; }
+            if (!builderParts.some(p => p.type === "engine")) { alert("Нужен двигатель!"); return; }
+            if (!builderParts.some(p => p.type === "nose")) { alert("Нужен обтекатель!"); return; }
+
+            // Создаём ракету на поверхности Земли
+            const earth = PLANETS[0];
+            rocket = {
+                parts: JSON.parse(JSON.stringify(builderParts)),
+                x: earth.x,
+                y: earth.y - earth.radius - 10,
+                vx: 0,
+                vy: 0,
+                angle: -Math.PI / 2, // Смотрит вверх
+                angularVel: 0,
+                alive: true,
+                maxAlt: 0,
+                stage: 1
+            };
+
+            camera.x = rocket.x;
+            camera.y = rocket.y;
+            camera.zoom = 1;
+
+            document.getElementById("builder").classList.add("hidden");
+            flightActive = true;
+            hideMessage();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resetFlight() {
+            startFlight();
+        }
+
+        // ==================== ФИЗИКА ====================
+        function updatePhysics(dt) {
+            if (!rocket || !rocket.alive) return;
+
+            // Управление
+            if (keys["a"] || keys["arrowleft"]) rocket.angularVel -= 2 * dt;
+            if (keys["d"] || keys["arrowright"]) rocket.angularVel += 2 * dt;
+            rocket.angularVel *= 0.9; // Затухание
+            rocket.angle += rocket.angularVel * dt;
+
+            // Тяга
+            let totalThrust = 0;
+            let totalFuelRate = 0;
+            let hasFuel = false;
+
+            rocket.parts.forEach(p => {
+                if (p.type === "engine" && p.thrust) {
+                    totalThrust += p.thrust;
+                    totalFuelRate += p.fuelRate;
+                }
+                if (p.type === "tank" && p.fuel > 0) hasFuel = true;
+            });
+
+            let currentThrust = 0;
+            if ((keys["w"] || keys["arrowup"]) && hasFuel && throttle > 0) {
+                currentThrust = totalThrust * (throttle / 100);
+                
+                // Расход топлива
+                let fuelNeeded = totalFuelRate * dt;
+                rocket.parts.forEach(p => {
+                    if (p.type === "tank" && p.fuel > 0 && fuelNeeded > 0) {
+                        let use = Math.min(p.fuel, fuelNeeded);
+                        p.fuel -= use;
+                        fuelNeeded -= use;
+                    }
+                });
+            }
+
+            // Масса ракеты
+            let mass = rocket.parts.reduce((sum, p) => sum + p.mass + (p.fuel || 0), 0);
+
+            // Гравитация от всех планет
+            let ax = 0, ay = 0;
+            PLANETS.forEach(pl => {
+                let dx = pl.x - rocket.x;
+                let dy = pl.y - rocket.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                let force = (G * pl.mass) / (dist * dist);
+                ax += force * (dx / dist);
+                ay += force * (dy / dist);
+            });
+
+            // Ускорение от тяги
+            if (currentThrust > 0 && mass > 0) {
+                ax += (currentThrust / mass) * Math.cos(rocket.angle);
+                ay += (currentThrust / mass) * Math.sin(rocket.angle);
+            }
+
+            // Интегрирование (метод Эйлера)
+            rocket.vx += ax * dt;
+            rocket.vy += ay * dt;
+            rocket.x += rocket.vx * dt;
+            rocket.y += rocket.vy * dt;
+
+            // Столкновение с планетами
+            PLANETS.forEach(pl => {
+                let dx = rocket.x - pl.x;
+                let dy = rocket.y - pl.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < pl.radius + 5) {
+                    let speed = Math.sqrt(rocket.vx*rocket.vx + rocket.vy*rocket.vy);
+                    if (speed > 5) {
+                        rocket.alive = false;
+                        showMessage("💥 КРУШЕНИЕ", `Скорость удара: ${speed.toFixed(1)} м/с`, false);
+                    } else {
+                        rocket.vx = 0; rocket.vy = 0;
+                        rocket.x = pl.x + (dx/dist) * (pl.radius + 5);
+                        rocket.y = pl.y + (dy/dist) * (pl.radius + 5);
+                    }
+                }
+            });
+
+            // Разделение ступеней (Пробел)
+            if (keys[" "] && !keys["space_used"]) {
+                keys["space_used"] = true;
+                // Находим и удаляем самый нижний отработанный двигатель/бак
+                for (let i = 0; i < rocket.parts.length; i++) {
+                    let p = rocket.parts[i];
+                    if (p.type === "engine" || (p.type === "tank" && p.fuel <= 0)) {
+                        rocket.parts.splice(i, 1);
+                        rocket.stage++;
+                        break;
+                    }
+                }
+            }
+            if (!keys[" "]) keys["space_used"] = false;
+
+            // Телеметрия
+            let earth = PLANETS[0];
+            let distToEarth = Math.sqrt((rocket.x - earth.x)**2 + (rocket.y - earth.y)**2);
+            let alt = Math.max(0, distToEarth - earth.radius);
+            let speed = Math.sqrt(rocket.vx*rocket.vx + rocket.vy*rocket.vy);
+            
+            // Упрощённый расчёт апоцентра и перицентра
+            let energy = 0.5 * speed * speed - (G * earth.mass) / distToEarth;
+            let apo = 0, peri = distToEarth;
+            if (energy < 0) {
+                let a = - (G * earth.mass) / (2 * energy); // Большая полуось
+                apo = 2 * a - distToEarth;
+                peri = distToEarth; // Упрощение
+            }
+
+            document.getElementById("t-alt").innerText = alt.toFixed(0) + " м";
+            document.getElementById("t-speed").innerText = speed.toFixed(1) + " м/с";
+            document.getElementById("t-apo").innerText = (apo - earth.radius).toFixed(0) + " м";
+            document.getElementById("t-peri").innerText = (peri - earth.radius).toFixed(0) + " м";
+            document.getElementById("t-fuel").innerText = rocket.parts.filter(p=>p.type==="tank").reduce((s,p)=>s+p.fuel,0).toFixed(0) + " кг";
+            document.getElementById("t-stage").innerText = rocket.stage;
+        }
+
+        // ==================== ОТРИСОВКА ====================
+        function draw() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+
+            // Динамический зум камеры
+            let earth = PLANETS[0];
+            let dist = Math.sqrt((rocket.x - earth.x)**2 + (rocket.y - earth.y)**2);
+            let targetZoom = Math.max(0.1, 1 - (dist - earth.radius) / 5000);
+            camera.zoom += (targetZoom - camera.zoom) * 0.05;
+            
+            camera.x += (rocket.x - camera.x) * 0.1;
+            camera.y += (rocket.y - camera.y) * 0.1;
+
+            ctx.fillStyle = "#050510";
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.save();
+            ctx.translate(width/2, height/2);
+            ctx.scale(camera.zoom, camera.zoom);
+            ctx.translate(-camera.x, -camera.y);
+
+            // Звёзды (параллакс)
+            ctx.fillStyle = "#ffffff";
+            stars.forEach(s => {
+                ctx.globalAlpha = 0.5 + Math.random()*0.5;
+                ctx.fillRect(s.x, s.y, s.size / camera.zoom, s.size / camera.zoom);
+            });
+            ctx.globalAlpha = 1;
+
+            // Предсказание орбиты
+            if (rocket && rocket.alive) {
+                drawTrajectory();
+            }
+
+            // Планеты
+            PLANETS.forEach(pl => {
+                // Атмосфера
+                if (pl.atmosphere > 0) {
+                    ctx.beginPath();
+                    ctx.arc(pl.x, pl.y, pl.radius + 20, 0, Math.PI*2);
+                    ctx.fillStyle = "rgba(100, 180, 255, 0.1)";
+                    ctx.fill();
+                }
+                // Тело планеты
+                ctx.beginPath();
+                ctx.arc(pl.x, pl.y, pl.radius, 0, Math.PI*2);
+                ctx.fillStyle = pl.color;
+                ctx.fill();
+                
+                // Детали (кратеры для Луны)
+                if (pl.name === "Луна") {
+                    ctx.fillStyle = "#888888";
+                    ctx.beginPath(); ctx.arc(pl.x - 20, pl.y - 20, 15, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(pl.x + 30, pl.y + 10, 10, 0, Math.PI*2); ctx.fill();
+                }
+            });
+
+            // Ракета
+            if (rocket) {
+                ctx.save();
+                ctx.translate(rocket.x, rocket.y);
+                ctx.rotate(rocket.angle);
+
+                // Пламя
+                if (throttle > 0 && rocket.parts.some(p => p.type === "tank" && p.fuel > 0)) {
+                    let flameLen = 20 + Math.random() * 15;
+                    ctx.fillStyle = "#ffaa00";
+                    ctx.beginPath();
+                    ctx.moveTo(-10, 10);
+                    ctx.lineTo(0, 10 + flameLen);
+                    ctx.lineTo(10, 10);
+                    ctx.fill();
+                    ctx.fillStyle = "#ffffaa";
+                    ctx.beginPath();
+                    ctx.moveTo(-5, 10);
+                    ctx.lineTo(0, 10 + flameLen*0.6);
+                    ctx.lineTo(5, 10);
+                    ctx.fill();
+                }
+
+                // Детали ракеты
+                let yPos = 0;
+                rocket.parts.forEach(p => {
+                    ctx.fillStyle = p.color;
+                    if (p.type === "nose") {
+                        ctx.beginPath();
+                        ctx.moveTo(-p.width/2, yPos);
+                        ctx.lineTo(0, yPos - p.height);
+                        ctx.lineTo(p.width/2, yPos);
+                        ctx.fill();
+                    } else {
+                        ctx.fillRect(-p.width/2, yPos - p.height, p.width, p.height);
+                    }
+                    yPos -= p.height;
+                });
+
+                ctx.restore();
+            }
+
+            ctx.restore();
+        }
+
+        function drawTrajectory() {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 1 / camera.zoom;
+            ctx.beginPath();
+
+            // Симуляция вперёд на 500 шагов
+            let simX = rocket.x, simY = rocket.y;
+            let simVx = rocket.vx, simVy = rocket.vy;
+            let simMass = rocket.parts.reduce((s, p) => s + p.mass + (p.fuel||0), 0);
+            let simThrust = 0;
+            if (throttle > 0 && rocket.parts.some(p => p.type === "tank" && p.fuel > 0)) {
+                rocket.parts.forEach(p => { if (p.type === "engine") simThrust += p.thrust; });
+            }
+
+            ctx.moveTo(simX, simY);
+            let dt = 0.5;
+            for (let i = 0; i < 500; i++) {
+                let ax = 0, ay = 0;
+                PLANETS.forEach(pl => {
+                    let dx = pl.x - simX, dy = pl.y - simY;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    let force = (G * pl.mass) / (dist * dist);
+                    ax += force * (dx / dist);
+                    ay += force * (dy / dist);
+                });
+                if (simThrust > 0 && simMass > 0) {
+                    ax += (simThrust / simMass) * Math.cos(rocket.angle);
+                    ay += (simThrust / simMass) * Math.sin(rocket.angle);
+                }
+                simVx += ax * dt; simVy += ay * dt;
+                simX += simVx * dt; simY += simVy * dt;
+                ctx.lineTo(simX, simY);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // ==================== ЦИКЛ ИГРЫ ====================
+        let lastTime = 0;
+        function gameLoop(time) {
+            if (!flightActive) return;
+            let dt = (time - lastTime) / 1000;
+            if (dt > 0.1) dt = 0.1;
+            lastTime = time;
+
+            updatePhysics(dt * 10); // Ускорение времени для динамики
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ==================== УТИЛИТЫ ====================
+        function showMessage(title, text, success) {
+            document.getElementById("msg-title").innerText = title;
+            document.getElementById("msg-text").innerText = text;
+            let msg = document.getElementById("message");
+            msg.className = success ? "success" : "";
+            msg.style.display = "block";
+        }
+        function hideMessage() { document.getElementById("message").style.display = "none"; }
+
+        // ==================== СОБЫТИЯ ====================
+        window.addEventListener("keydown", e => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key.toLowerCase() === "r") resetFlight();
+        });
+        window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+        document.getElementById("throttle-slider").addEventListener("input", e => throttle = parseInt(e.target.value));
+        window.addEventListener("resize", () => { width = window.innerWidth; height = window.innerHeight; });
+
+        // Старт
+        updateBuilderUI();
+    </script>
+</body>
+</html>
